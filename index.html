@@ -168,6 +168,7 @@ dialog h3{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(-
     <button class="tool-btn" data-tool="pencil" title="Pencil (B)"><svg viewBox="0 0 16 16"><path d="M11 1h2v1h1v1h1v2h-1v1h-1V5h-1V4h-1V3h-1V2h1zM9 3h1v1h1v1h1v1h1v1h-1v1h-1V7h-1V6H9V5H8V4h1zM7 5h1v1h1v1h1v1h1v1h-1v1h-1V9H8V8H7V7H6V6h1zM5 7h1v1h1v1h1v1h1v1H8v1H7v-1H6v-1H5V9H4V8h1zM3 9h1v1h1v1h1v1h1v1H4v1H2v-2h1z"/></svg></button>
     <button class="tool-btn" data-tool="eraser" title="Eraser (E)"><svg viewBox="0 0 16 16"><path d="M9 2h3v1h1v1h1v3h-1v1h-1v1h-1V8h-1V7H9V6H8V5H7V4h1V3h1zM5 6h1v1h1v1h1v1h1v1h1v1h-1v1h-1v1H7v1H3v-1H2v-2h1v-1h1V8h1z"/></svg></button>
     <button class="tool-btn" data-tool="eyedropper" title="Eyedropper (I) — or Alt+click"><svg viewBox="0 0 16 16"><path d="M12 1h2v1h1v2h-1v1h-1v1h-1V5h-1V4h-1V3h1V2h1zM8 4h1v1h1v1h1v1h1v1h-1v1h-1v1H9v1H8v1H7v1H6v1H5v1H2v-3h1v-1h1v-1h1V9h1V8h1V7h1V6H8z"/></svg></button>
+    <button class="tool-btn" data-tool="colorErase" title="Color erase (C) — circular brush that deletes only the picked color"><svg viewBox="0 0 16 16"><path d="M6 2h4v1h2v1h1v2h1v4h-1v2h-1v1h-2v1H6v-1H4v-1H3v-2H2V6h1V4h1V3h2zm0 2H5v1H4v6h1v1h1v1h4v-1h1v-1h1V5h-1V4h-1V3H6zM6 6h2v2H6zM8 8h2v2H8z"/></svg></button>
     <button class="tool-btn" data-tool="fill" title="Fill (F)"><svg viewBox="0 0 16 16"><path d="M7 1h2v2h1v1h1v1h1v1h1v2h-1v1h-1v1h-1v1h-1v1H8v1H6v-1H5v-1H4v-1H3v-1H2V8h1V7h1V6h1V5h1V4h1zm0 3H6v1H5v1H4v1h6V6H9V5H8V4H7zM14 9h1v3h-1v1h-2v-1h-1v-2h1v1h1V9h1z"/></svg></button>
     <button class="tool-btn" data-tool="line" title="Line (L)"><svg viewBox="0 0 16 16"><path d="M12 2h2v2h-1v1h-1v1h-1v1h-1v1H9v1H8v1H7v1H6v1H5v1H4v1H2v-2h1v-1h1v-1h1V9h1V8h1V7h1V6h1V5h1V4h1V3h1z"/></svg></button>
     <button class="tool-btn" data-tool="rect" title="Rectangle (R)"><svg viewBox="0 0 16 16"><path d="M2 3h12v10H2zm2 2v6h8V5z"/></svg></button>
@@ -200,7 +201,7 @@ dialog h3{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(-
       <h2>Tool</h2>
       <div class="opt-row">
         <label for="brushSize">Size</label>
-        <input id="brushSize" type="range" min="1" max="8" step="1" value="1">
+        <input id="brushSize" type="range" min="1" max="32" step="1" value="1">
         <output id="brushSizeOut">1</output>
       </div>
       <div class="opt-row">
@@ -491,10 +492,17 @@ function render(){
   }
   // hover pixel outline
   if(state.hover&&!state.playing&&z>=3){
-    const b=state.brushSize,o=Math.floor(b/2),usesBrush=(state.tool==='pencil'||state.tool==='eraser'||state.tool==='line');
-    const s=usesBrush?b:1,off=usesBrush?o:0;
+    const b=state.brushSize,o=Math.floor(b/2);
     vctx.strokeStyle='rgba(255,255,255,.5)';vctx.lineWidth=1;
-    vctx.strokeRect(px+(state.hover.x-off)*z+.5,py+(state.hover.y-off)*z+.5,s*z-1,s*z-1);
+    if(state.tool==='colorErase'){
+      vctx.beginPath();
+      vctx.arc(px+(state.hover.x-o+b/2)*z,py+(state.hover.y-o+b/2)*z,b*z/2,0,Math.PI*2);
+      vctx.stroke();
+    }else{
+      const usesBrush=(state.tool==='pencil'||state.tool==='eraser'||state.tool==='line');
+      const s=usesBrush?b:1,off=usesBrush?o:0;
+      vctx.strokeRect(px+(state.hover.x-off)*z+.5,py+(state.hover.y-off)*z+.5,s*z-1,s*z-1);
+    }
   }
   updateStatus();
 }
@@ -652,9 +660,16 @@ const toolEyedropper={
   pick(p,secondary){
     const d=state.doc;
     if(p.x<0||p.y<0||p.x>=d.width||p.y>=d.height)return;
-    const px=ctx2d(renderComposite(state.frame)).getImageData(p.x,p.y,1,1).data;
-    if(px[3]===0)return;
-    setColor(rgbToHex(px[0],px[1],px[2]),secondary);
+    // exact stored color of the topmost visible layer with paint at this pixel
+    // (sampling the composite would return opacity-blended colors)
+    const layers=activeFrame().layers;
+    for(let i=layers.length-1;i>=0;i--){
+      if(!layers[i].visible)continue;
+      const px=ctx2d(layers[i].canvas).getImageData(p.x,p.y,1,1).data;
+      if(px[3]===0)continue;
+      setColor(rgbToHex(px[0],px[1],px[2]),secondary);
+      return;
+    }
   },
 };
 function makeBrushTool(erase){
@@ -677,6 +692,41 @@ function makeBrushTool(erase){
     onUp(){endStroke();},
   };
 }
+/* color erase: circular brush that clears only pixels matching the target color */
+const toolColorErase={
+  onDown(p,e){
+    beginStroke();
+    this.last=p;
+    this.target=hexToRgba(strokeColor(e.button));
+    const c=activeLayer().canvas;
+    this.img=ctx2d(c).getImageData(0,0,c.width,c.height);
+    this.eraseAt(p.x,p.y);
+    this.flush();
+  },
+  onMove(p){
+    if(!this.img)return;
+    plotLine(this.last.x,this.last.y,p.x,p.y,(x,y)=>this.eraseAt(x,y));
+    this.last=p;
+    this.flush();
+  },
+  onUp(){this.img=null;endStroke();},
+  eraseAt(cx,cy){
+    const img=this.img,w=img.width,h=img.height,d=img.data,t=this.target;
+    const b=state.brushSize,o=Math.floor(b/2),r=b/2;
+    for(let y=0;y<b;y++)for(let x=0;x<b;x++){
+      const dx=x+.5-r,dy=y+.5-r;
+      if(dx*dx+dy*dy>r*r)continue;
+      const px=cx-o+x,py=cy-o+y;
+      if(px<0||py<0||px>=w||py>=h)continue;
+      const i=(py*w+px)*4;
+      if(d[i+3]!==0&&d[i]===t[0]&&d[i+1]===t[1]&&d[i+2]===t[2])d[i+3]=0;
+    }
+  },
+  flush(){
+    activeLayer().canvas.getContext('2d').putImageData(this.img,0,0);
+    requestRender();
+  },
+};
 function makeShapeTool(kind){
   return {
     onDown(p,e){
@@ -749,6 +799,7 @@ const TOOLS={
   pencil:makeBrushTool(false),
   eraser:makeBrushTool(true),
   eyedropper:{onDown(p,e){toolEyedropper.pick(p,e.button===2);}},
+  colorErase:toolColorErase,
   fill:toolFill,
   line:makeShapeTool('line'),
   rect:makeShapeTool('rect'),
@@ -759,7 +810,8 @@ const TOOLS={
 const TOOL_HINTS={
   pencil:'Pencil — left: primary, right: secondary, Alt: pick color',
   eraser:'Eraser — drag to erase',
-  eyedropper:'Eyedropper — left: primary, right: secondary',
+  eyedropper:'Eyedropper — picks the exact layer color; left: primary, right: secondary',
+  colorErase:'Color erase — deletes only the primary color inside the circle (right-drag: secondary, Alt: pick color)',
   fill:'Fill — flood fill contiguous color',
   line:'Line — drag; Shift: snap 45°',
   rect:'Rectangle — drag; Shift: square',
@@ -1442,7 +1494,7 @@ $('#btnGrid').addEventListener('click',()=>{
 });
 
 /* =========================== keyboard ========================== */
-const TOOL_KEYS={b:'pencil',e:'eraser',i:'eyedropper',f:'fill',l:'line',r:'rect',o:'ellipse',m:'select',v:'move'};
+const TOOL_KEYS={b:'pencil',e:'eraser',i:'eyedropper',c:'colorErase',f:'fill',l:'line',r:'rect',o:'ellipse',m:'select',v:'move'};
 document.addEventListener('keydown',e=>{
   const tag=e.target.tagName;
   if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA')return;
@@ -1479,7 +1531,7 @@ document.addEventListener('keydown',e=>{
   if(k==='-'){zoomStep(-1);return;}
   if(k==='0'){zoomToFit();return;}
   if(k==='['){$('#brushSize').value=state.brushSize=Math.max(1,state.brushSize-1);$('#brushSizeOut').textContent=state.brushSize;requestRender();return;}
-  if(k===']'){$('#brushSize').value=state.brushSize=Math.min(8,state.brushSize+1);$('#brushSizeOut').textContent=state.brushSize;requestRender();return;}
+  if(k===']'){$('#brushSize').value=state.brushSize=Math.min(32,state.brushSize+1);$('#brushSizeOut').textContent=state.brushSize;requestRender();return;}
 });
 document.addEventListener('keyup',e=>{
   if(e.code==='Space'){state.spaceDown=false;viewCanvas.classList.remove('panning');}
