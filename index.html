@@ -55,8 +55,8 @@ main{display:grid;grid-template-columns:auto minmax(0,1fr) 236px;min-height:0}
 .tool-btn.active{background:var(--accent);color:var(--ink);border-color:var(--accent);box-shadow:2px 2px 0 rgba(0,0,0,.45)}
 #viewport{position:relative;overflow:hidden;background:var(--deep)}
 #view{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair}
-#view.panning{cursor:grab}
-#view.panning:active{cursor:grabbing}
+#view.panning,#view.hand{cursor:grab}
+#view.panning:active,#view.hand:active{cursor:grabbing}
 
 /* ---- side panel ---- */
 #sidepanel{background:var(--panel);border-left:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column}
@@ -175,6 +175,7 @@ dialog h3{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(-
     <button class="tool-btn" data-tool="ellipse" title="Ellipse (O)"><svg viewBox="0 0 16 16"><path d="M6 2h4v1h2v1h1v2h1v4h-1v2h-1v1h-2v1H6v-1H4v-1H3v-2H2V6h1V4h1V3h2zm0 2H5v1H4v6h1v1h1v1h4v-1h1v-1h1V5h-1V4h-1V3H6z"/></svg></button>
     <button class="tool-btn" data-tool="select" title="Select (M)"><svg viewBox="0 0 16 16"><path d="M1 1h4v2H3v2H1zM11 1h4v4h-2V3h-2zM1 11h2v2h2v2H1zM13 11h2v4h-4v-2h2zM7 1h2v2H7zM7 13h2v2H7zM1 7h2v2H1zM13 7h2v2h-2z"/></svg></button>
     <button class="tool-btn" data-tool="move" title="Move selection (V)"><svg viewBox="0 0 16 16"><path d="M7 1h2v2h1v1h1v1h-1v1H9v1h4V6h1V5h1v1h1v1h1v2h-1v1h-1v1h-1v-1h-1v-1H9v4h1v1h1v1h-1v1H9v1H7v-1H6v-1H5v-1h1v-1h1V9H3v1H2v1H1v-1H0v-1H0V7h1V6h1V5h1v1h1v1h4V4H7V3H6V2h1z" transform="translate(0 -0.5)"/></svg></button>
+    <button class="tool-btn" data-tool="pan" title="Pan (H) — drag to move the view · also Space+drag or middle-mouse"><svg viewBox="0 0 16 16"><path d="M6 5h1V2h1v3h1V3h1v2h1V4h1v2h1v5h-1v2h-1v1H6v-1H5v-1H4v-1H3v-1H2V9h1V8h2v1h1z"/></svg></button>
   </nav>
 
   <div id="viewport"><canvas id="view"></canvas></div>
@@ -308,7 +309,7 @@ function cloneCanvas(src){const c=makeCanvas(src.width,src.height);c.getContext(
 function ctx2d(c){return c.getContext('2d',{willReadFrequently:true});}
 
 /* ============================ state ============================ */
-const ZOOM_LEVELS=[1,2,3,4,5,6,8,10,12,16,20,24,32,40,48,64];
+const ZOOM_LEVELS=[0.1,0.125,0.167,0.25,0.333,0.5,0.667,1,2,3,4,5,6,8,10,12,16,20,24,32,40,48,64];
 const state={
   doc:null, frame:0, layer:0,
   tool:'pencil',
@@ -541,7 +542,9 @@ function zoomStep(dir,cx,cy){
 }
 function zoomToFit(){
   const v=viewSize(),d=state.doc;
-  const z=Math.max(1,Math.floor(Math.min(v.w/d.width,v.h/d.height)*0.85));
+  // exact ratio that fits the whole document with a small margin; may go below 100%
+  let z=Math.min(v.w/d.width,v.h/d.height)*0.95;
+  if(z>=1)z=Math.floor(z);   // crisp integer zoom when we can show pixels 1:1 or larger
   state.zoom=clamp(z,ZOOM_LEVELS[0],ZOOM_LEVELS[ZOOM_LEVELS.length-1]);
   state.panX=Math.round((v.w-d.width*state.zoom)/2);
   state.panY=Math.round((v.h-d.height*state.zoom)/2);
@@ -557,7 +560,7 @@ viewCanvas.addEventListener('wheel',e=>{
 viewCanvas.addEventListener('pointerdown',e=>{
   viewCanvas.setPointerCapture(e.pointerId);
   pointer.lastX=e.clientX;pointer.lastY=e.clientY;
-  if(e.button===1||state.spaceDown){pointer.panning=true;return;}
+  if(e.button===1||state.spaceDown||state.tool==='pan'){pointer.panning=true;return;}
   if(state.playing)stopPlayback();
   const p=screenToDoc(e);
   pointer.down=true;pointer.button=e.button;
@@ -806,6 +809,7 @@ const TOOLS={
   ellipse:makeShapeTool('ellipse'),
   select:{},   // implemented with selection feature
   move:{},     // implemented with selection feature
+  pan:{},      // panning is handled directly in the pointer handlers
 };
 const TOOL_HINTS={
   pencil:'Pencil — left: primary, right: secondary, Alt: pick color',
@@ -818,6 +822,7 @@ const TOOL_HINTS={
   ellipse:'Ellipse — drag; Shift: circle',
   select:'Select — drag a rectangle; drag inside it to move; Esc deselects',
   move:'Move — drag selection or whole layer',
+  pan:'Pan — drag to move the view (also Space+drag or middle-mouse from any tool)',
 };
 function setTool(name){
   if(!(name in TOOLS))return;
@@ -826,6 +831,7 @@ function setTool(name){
   if(state.tool!==name&&wasSel&&!isSel)commitFloat();
   state.tool=name;
   $$('.tool-btn').forEach(b=>b.classList.toggle('active',b.dataset.tool===name));
+  viewCanvas.classList.toggle('hand',name==='pan');
   $('#statusHint').textContent=TOOL_HINTS[name]||'';
   requestRender();
 }
@@ -1494,7 +1500,7 @@ $('#btnGrid').addEventListener('click',()=>{
 });
 
 /* =========================== keyboard ========================== */
-const TOOL_KEYS={b:'pencil',e:'eraser',i:'eyedropper',c:'colorErase',f:'fill',l:'line',r:'rect',o:'ellipse',m:'select',v:'move'};
+const TOOL_KEYS={b:'pencil',e:'eraser',i:'eyedropper',c:'colorErase',f:'fill',l:'line',r:'rect',o:'ellipse',m:'select',v:'move',h:'pan'};
 document.addEventListener('keydown',e=>{
   const tag=e.target.tagName;
   if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA')return;
