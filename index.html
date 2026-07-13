@@ -306,7 +306,7 @@ dialog h3{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(-
   <h3>Save grid images</h3>
   <p id="sliceCount" style="color:var(--dim);margin-bottom:12px"></p>
   <div class="dlg-row"><label for="sliceBase">Base name</label><input id="sliceBase" type="text" spellcheck="false" value="Photo" style="width:120px"></div>
-  <p style="color:var(--dim);margin-bottom:10px;font-size:11px">Named <span id="sliceEg" style="color:var(--text)"></span> · exported at the current PNG scale (top-right).</p>
+  <p style="color:var(--dim);margin-bottom:10px;font-size:11px">Named <span id="sliceEg" style="color:var(--text)"></span> · bundled into one <b>.zip</b> · at the current PNG scale (top-right).</p>
   <div class="dlg-actions">
     <button id="sliceSaveCancel">Cancel</button>
     <button id="sliceSaveOk" class="primary">Save images</button>
@@ -1617,8 +1617,9 @@ function openSliceSave(){
 }
 function updateSliceEg(){
   const base=$('#sliceBase').value.trim()||'Photo';
-  const n=sliceCells().length;
-  $('#sliceEg').textContent=n<=1?`${base}1`:`${base}1 … ${base}${n}`;
+  const n=sliceCells().length,pad=String(n).length;
+  const one=`${base}${'1'.padStart(pad,'0')}`;
+  $('#sliceEg').textContent=n<=1?`${one}.png`:`${one}.png … ${base}${n}.png`;
 }
 $('#sliceBase').addEventListener('input',updateSliceEg);
 $('#sliceSaveDialog').addEventListener('keydown',e=>{
@@ -1630,20 +1631,49 @@ $('#sliceSaveOk').addEventListener('click',()=>{
   $('#sliceSaveDialog').close();
   exportSlices(base);
 });
+/* minimal store-only (uncompressed) ZIP builder — PNGs are already compressed.
+   Browsers throttle rapid multi-file downloads (~10 max), so many cells are
+   delivered as one .zip instead of one download per cell. */
+const crc32Table=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xedb88320^(c>>>1)):(c>>>1);t[n]=c>>>0;}return t;})();
+function crc32(bytes){let c=0xffffffff;for(let i=0;i<bytes.length;i++)c=crc32Table[(c^bytes[i])&0xff]^(c>>>8);return (c^0xffffffff)>>>0;}
+function dataURLtoBytes(url){const bin=atob(url.split(',')[1]);const a=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);return a;}
+function makeZip(files){                       // files: [{name, bytes:Uint8Array}]
+  const enc=new TextEncoder();
+  const u16=v=>[v&255,(v>>8)&255], u32=v=>[v&255,(v>>8)&255,(v>>16)&255,(v>>24)&255];
+  const parts=[], central=[]; let offset=0;
+  for(const f of files){
+    const name=enc.encode(f.name), crc=crc32(f.bytes), size=f.bytes.length;
+    const local=new Uint8Array([].concat(u32(0x04034b50),u16(20),u16(0),u16(0),u16(0),u16(0),
+      u32(crc),u32(size),u32(size),u16(name.length),u16(0)));
+    parts.push(local,name,f.bytes);
+    central.push(new Uint8Array([].concat(u32(0x02014b50),u16(20),u16(20),u16(0),u16(0),u16(0),u16(0),
+      u32(crc),u32(size),u32(size),u16(name.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(offset))),name);
+    offset+=local.length+name.length+size;
+  }
+  const cdStart=offset; let cdSize=0;
+  for(const c of central){parts.push(c);cdSize+=c.length;}
+  parts.push(new Uint8Array([].concat(u32(0x06054b50),u16(0),u16(0),
+    u16(central.length/2),u16(central.length/2),u32(cdSize),u32(cdStart),u16(0))));
+  return new Blob(parts,{type:'application/zip'});
+}
 function exportSlices(base){
   if(!state.slice)return;
   commitFloat();
   const cells=sliceCells();
   const comp=renderComposite(state.frame);
   const sc=exportScale();
-  cells.forEach((cell,i)=>{
+  const pad=String(cells.length).length;       // zero-pad so files sort naturally
+  const files=cells.map((cell,i)=>{
     const c=makeCanvas(cell.w*sc,cell.h*sc),ctx=c.getContext('2d');
     ctx.imageSmoothingEnabled=false;
     ctx.drawImage(comp,cell.x,cell.y,cell.w,cell.h,0,0,c.width,c.height);
-    download(`${base}${i+1}.png`,c.toDataURL('image/png'));
+    return {name:`${base}${String(i+1).padStart(pad,'0')}.png`,bytes:dataURLtoBytes(c.toDataURL('image/png'))};
   });
+  const url=URL.createObjectURL(makeZip(files));
+  download(`${base}.zip`,url);
+  setTimeout(()=>URL.revokeObjectURL(url),4000);
   state.slice=null;
-  $('#statusHint').textContent=`Grid slicer — exported ${cells.length} image${cells.length===1?'':'s'} (${base}1 … ${base}${cells.length})`;
+  $('#statusHint').textContent=`Grid slicer — exported ${cells.length} image${cells.length===1?'':'s'} to ${base}.zip`;
   requestRender();
 }
 /* overlay: placed edge lines, a live guide at the cursor, and numbered cells */
