@@ -176,6 +176,7 @@ dialog h3{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(-
     <button class="tool-btn" data-tool="select" title="Select (M)"><svg viewBox="0 0 16 16"><path d="M1 1h4v2H3v2H1zM11 1h4v4h-2V3h-2zM1 11h2v2h2v2H1zM13 11h2v4h-4v-2h2zM7 1h2v2H7zM7 13h2v2H7zM1 7h2v2H1zM13 7h2v2h-2z"/></svg></button>
     <button class="tool-btn" data-tool="move" title="Move selection (V)"><svg viewBox="0 0 16 16"><path d="M7 1h2v2h1v1h1v1h-1v1H9v1h4V6h1V5h1v1h1v1h1v2h-1v1h-1v1h-1v-1h-1v-1H9v4h1v1h1v1h-1v1H9v1H7v-1H6v-1H5v-1h1v-1h1V9H3v1H2v1H1v-1H0v-1H0V7h1V6h1V5h1v1h1v1h4V4H7V3H6V2h1z" transform="translate(0 -0.5)"/></svg></button>
     <button class="tool-btn" data-tool="pan" title="Pan (H) — drag to move the view · also Space+drag or middle-mouse"><svg viewBox="0 0 16 16"><path d="M6 5h1V2h1v3h1V3h1v2h1V4h1v2h1v5h-1v2h-1v1H6v-1H5v-1H4v-1H3v-1H2V9h1V8h2v1h1z"/></svg></button>
+    <button class="tool-btn" data-tool="slice" title="Grid slicer (K) — carve the canvas into a grid and export each cell as its own image"><svg viewBox="0 0 16 16"><path d="M2 2h12v1H2z M2 13h12v1H2z M2 2v12h1V2z M13 2v12h1V2z M7 2v12h1V2z M2 7h12v1H2z"/></svg></button>
   </nav>
 
   <div id="viewport"><canvas id="view"></canvas></div>
@@ -289,6 +290,29 @@ dialog h3{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(-
   </div>
 </dialog>
 
+<dialog id="sliceDialog">
+  <h3>Grid slicer</h3>
+  <p style="color:var(--dim);margin-bottom:12px;max-width:280px">Set how many grid <b>edges</b> (lines) to place on each axis — the outer sides count too. You'll click each one on the canvas: verticals left → right, then horizontals top → bottom. Every cell of the finished grid exports as its own image.</p>
+  <div class="dlg-row"><label for="sliceV">Vertical</label><input id="sliceV" type="number" min="2" max="64" value="3"> edges</div>
+  <div class="dlg-row"><label for="sliceH">Horizontal</label><input id="sliceH" type="number" min="2" max="64" value="3"> edges</div>
+  <p id="sliceGridInfo" style="color:var(--dim);margin-bottom:10px;font-size:11px"></p>
+  <div class="dlg-actions">
+    <button id="sliceCancel">Cancel</button>
+    <button id="sliceStart" class="primary">Start placing</button>
+  </div>
+</dialog>
+
+<dialog id="sliceSaveDialog">
+  <h3>Save grid images</h3>
+  <p id="sliceCount" style="color:var(--dim);margin-bottom:12px"></p>
+  <div class="dlg-row"><label for="sliceBase">Base name</label><input id="sliceBase" type="text" spellcheck="false" value="Photo" style="width:120px"></div>
+  <p style="color:var(--dim);margin-bottom:10px;font-size:11px">Named <span id="sliceEg" style="color:var(--text)"></span> · exported at the current PNG scale (top-right).</p>
+  <div class="dlg-actions">
+    <button id="sliceSaveCancel">Cancel</button>
+    <button id="sliceSaveOk" class="primary">Save images</button>
+  </div>
+</dialog>
+
 <input type="file" id="filePick" hidden>
 
 <script>
@@ -325,6 +349,8 @@ const state={
   spaceDown:false,
   shapePreview:null,   // {tool,x0,y0,x1,y1,color,fill}
   hover:null,          // {x,y} doc pixel under cursor
+  hoverFx:0, hoverFy:0,// last pointer position in fractional doc coords
+  slice:null,          // grid-slicer session: {phase,needV,needH,vEdges,hEdges,active}
 };
 
 /* ======================== document model ======================= */
@@ -505,6 +531,7 @@ function render(){
       vctx.strokeRect(px+(state.hover.x-off)*z+.5,py+(state.hover.y-off)*z+.5,s*z-1,s*z-1);
     }
   }
+  if(state.slice)drawSliceOverlay(px,py,z);
   updateStatus();
 }
 function resizeView(){
@@ -571,6 +598,7 @@ viewCanvas.addEventListener('pointerdown',e=>{
 viewCanvas.addEventListener('pointermove',e=>{
   const p=screenToDoc(e);
   state.hover=(p.x>=0&&p.y>=0&&p.x<state.doc.width&&p.y<state.doc.height)?{x:p.x,y:p.y}:null;
+  state.hoverFx=p.fx;state.hoverFy=p.fy;
   if(pointer.panning){
     state.panX+=e.clientX-pointer.lastX;
     state.panY+=e.clientY-pointer.lastY;
@@ -810,6 +838,7 @@ const TOOLS={
   select:{},   // implemented with selection feature
   move:{},     // implemented with selection feature
   pan:{},      // panning is handled directly in the pointer handlers
+  slice:{},    // implemented with the grid-slicer feature
 };
 const TOOL_HINTS={
   pencil:'Pencil — left: primary, right: secondary, Alt: pick color',
@@ -823,6 +852,7 @@ const TOOL_HINTS={
   select:'Select — drag a rectangle; drag inside it to move; Esc deselects',
   move:'Move — drag selection or whole layer',
   pan:'Pan — drag to move the view (also Space+drag or middle-mouse from any tool)',
+  slice:'Grid slicer — click to place grid edges, then export each cell as its own image',
 };
 function setTool(name){
   if(!(name in TOOLS))return;
@@ -833,6 +863,7 @@ function setTool(name){
   $$('.tool-btn').forEach(b=>b.classList.toggle('active',b.dataset.tool===name));
   viewCanvas.classList.toggle('hand',name==='pan');
   $('#statusHint').textContent=TOOL_HINTS[name]||'';
+  if(name==='slice'&&!state.slice)openSliceDialog();
   requestRender();
 }
 $$('.tool-btn').forEach(b=>b.addEventListener('click',()=>setTool(b.dataset.tool)));
@@ -1478,6 +1509,179 @@ function scaleLayerContent(newW,newH){
   $('#statusHint').textContent=`Scaled "${l.name}" content to ${newW} × ${newH} px`;
 }
 
+/* ========================== grid slicer ======================== */
+/* Carve the canvas into a grid the user defines by clicking edge lines,
+   then export each grid cell as its own numbered image. */
+function openSliceDialog(){
+  const s=state.slice;
+  $('#sliceV').value=s?s.needV:(+$('#sliceV').value||3);
+  $('#sliceH').value=s?s.needH:(+$('#sliceH').value||3);
+  updateSliceGridInfo();
+  $('#sliceDialog').showModal();
+}
+function updateSliceGridInfo(){
+  const v=clamp(Math.round(+$('#sliceV').value||0),2,64);
+  const h=clamp(Math.round(+$('#sliceH').value||0),2,64);
+  $('#sliceGridInfo').textContent=`= ${(v-1)}×${(h-1)} grid → ${(v-1)*(h-1)} image${(v-1)*(h-1)===1?'':'s'}`;
+}
+$('#sliceV').addEventListener('input',updateSliceGridInfo);
+$('#sliceH').addEventListener('input',updateSliceGridInfo);
+$('#sliceDialog').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();$('#sliceStart').click();}
+});
+$('#sliceCancel').addEventListener('click',()=>{$('#sliceDialog').close();cancelSlice();});
+$('#sliceStart').addEventListener('click',()=>{
+  const needV=clamp(Math.round(+$('#sliceV').value||0),2,64);
+  const needH=clamp(Math.round(+$('#sliceH').value||0),2,64);
+  $('#sliceDialog').close();
+  state.slice={phase:'v',needV,needH,vEdges:[],hEdges:[],active:true};
+  updateSliceHint();
+  requestRender();
+});
+/* click on canvas places one edge; right-click undoes the previous one */
+TOOLS.slice={
+  onDown(p,e){
+    const s=state.slice;
+    if(!s||!s.active){openSliceDialog();return;}
+    if(e.button===2){sliceUndoEdge();return;}
+    if(e.button!==0)return;
+    const d=state.doc;
+    if(s.phase==='v'){
+      s.vEdges.push(clamp(Math.round(p.fx),0,d.width));
+      if(s.vEdges.length>=s.needV)s.phase='h';
+    }else if(s.phase==='h'){
+      s.hEdges.push(clamp(Math.round(p.fy),0,d.height));
+      if(s.hEdges.length>=s.needH){sliceFinish();return;}
+    }
+    updateSliceHint();
+    requestRender();
+  },
+};
+function sliceUndoEdge(){
+  const s=state.slice;
+  if(!s||!s.active)return;
+  if(s.phase==='h'){
+    if(s.hEdges.length)s.hEdges.pop();
+    else if(s.vEdges.length){s.phase='v';s.vEdges.pop();}
+  }else if(s.vEdges.length){
+    s.vEdges.pop();
+  }
+  updateSliceHint();
+  requestRender();
+}
+function cancelSlice(){
+  state.slice=null;
+  $('#statusHint').textContent=TOOL_HINTS[state.tool]||'';
+  requestRender();
+}
+function updateSliceHint(){
+  const s=state.slice;
+  if(!s)return;
+  if(s.phase==='v')
+    $('#statusHint').textContent=`Grid slicer — click vertical edge ${s.vEdges.length+1} of ${s.needV} (left → right) · Right-click: undo · Esc: cancel`;
+  else if(s.phase==='h')
+    $('#statusHint').textContent=`Grid slicer — click horizontal edge ${s.hEdges.length+1} of ${s.needH} (top → bottom) · Right-click: undo · Esc: cancel`;
+  else
+    $('#statusHint').textContent=`Grid slicer — ${sliceCells().length} cells ready`;
+}
+/* unique, sorted grid lines → row-major list of cell rects */
+function sliceCells(){
+  const s=state.slice;
+  if(!s)return [];
+  const xs=[...new Set(s.vEdges)].sort((a,b)=>a-b);
+  const ys=[...new Set(s.hEdges)].sort((a,b)=>a-b);
+  const cells=[];
+  for(let r=0;r<ys.length-1;r++)for(let c=0;c<xs.length-1;c++){
+    const x=xs[c],y=ys[r],w=xs[c+1]-x,h=ys[r+1]-y;
+    if(w>0&&h>0)cells.push({x,y,w,h});
+  }
+  return cells;
+}
+function sliceFinish(){
+  const s=state.slice;
+  s.active=false;s.phase='done';
+  updateSliceHint();
+  requestRender();
+  openSliceSave();
+}
+function openSliceSave(){
+  const cells=sliceCells();
+  if(!cells.length){
+    $('#statusHint').textContent='Grid slicer — no cells to export (edges overlap)';
+    cancelSlice();
+    return;
+  }
+  $('#sliceCount').textContent=`${cells.length} image${cells.length===1?'':'s'} will be created from this grid.`;
+  updateSliceEg();
+  $('#sliceSaveDialog').showModal();
+}
+function updateSliceEg(){
+  const base=$('#sliceBase').value.trim()||'Photo';
+  const n=sliceCells().length;
+  $('#sliceEg').textContent=n<=1?`${base}1`:`${base}1 … ${base}${n}`;
+}
+$('#sliceBase').addEventListener('input',updateSliceEg);
+$('#sliceSaveDialog').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();$('#sliceSaveOk').click();}
+});
+$('#sliceSaveCancel').addEventListener('click',()=>{$('#sliceSaveDialog').close();cancelSlice();});
+$('#sliceSaveOk').addEventListener('click',()=>{
+  const base=$('#sliceBase').value.trim()||'Photo';
+  $('#sliceSaveDialog').close();
+  exportSlices(base);
+});
+function exportSlices(base){
+  if(!state.slice)return;
+  commitFloat();
+  const cells=sliceCells();
+  const comp=renderComposite(state.frame);
+  const sc=exportScale();
+  cells.forEach((cell,i)=>{
+    const c=makeCanvas(cell.w*sc,cell.h*sc),ctx=c.getContext('2d');
+    ctx.imageSmoothingEnabled=false;
+    ctx.drawImage(comp,cell.x,cell.y,cell.w,cell.h,0,0,c.width,c.height);
+    download(`${base}${i+1}.png`,c.toDataURL('image/png'));
+  });
+  state.slice=null;
+  $('#statusHint').textContent=`Grid slicer — exported ${cells.length} image${cells.length===1?'':'s'} (${base}1 … ${base}${cells.length})`;
+  requestRender();
+}
+/* overlay: placed edge lines, a live guide at the cursor, and numbered cells */
+function drawSliceOverlay(px,py,z){
+  const s=state.slice,d=state.doc,dw=d.width*z,dh=d.height*z;
+  vctx.save();
+  vctx.lineWidth=1;
+  vctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#f5a742';
+  s.vEdges.forEach(x=>{const sx=px+x*z+.5;vctx.beginPath();vctx.moveTo(sx,py);vctx.lineTo(sx,py+dh);vctx.stroke();});
+  s.hEdges.forEach(y=>{const sy=py+y*z+.5;vctx.beginPath();vctx.moveTo(px,sy);vctx.lineTo(px+dw,sy);vctx.stroke();});
+  // live guide line under the cursor while placing
+  if(s.active&&state.hover){
+    vctx.setLineDash([4,4]);vctx.strokeStyle='#59d9e8';
+    if(s.phase==='v'){
+      const sx=px+clamp(Math.round(state.hoverFx),0,d.width)*z+.5;
+      vctx.beginPath();vctx.moveTo(sx,py);vctx.lineTo(sx,py+dh);vctx.stroke();
+    }else if(s.phase==='h'){
+      const sy=py+clamp(Math.round(state.hoverFy),0,d.height)*z+.5;
+      vctx.beginPath();vctx.moveTo(px,sy);vctx.lineTo(px+dw,sy);vctx.stroke();
+    }
+    vctx.setLineDash([]);
+  }
+  // once the grid is complete, tint + number each cell
+  if(s.phase==='done'){
+    const cells=sliceCells();
+    vctx.fillStyle='rgba(245,167,66,.12)';
+    vctx.font='bold 11px '+(getComputedStyle(document.documentElement).getPropertyValue('--font')||'monospace');
+    vctx.textAlign='center';vctx.textBaseline='middle';
+    cells.forEach((cell,i)=>{
+      vctx.fillStyle='rgba(245,167,66,.12)';
+      vctx.fillRect(px+cell.x*z,py+cell.y*z,cell.w*z,cell.h*z);
+      vctx.fillStyle='#fff';
+      vctx.fillText(String(i+1),px+(cell.x+cell.w/2)*z,py+(cell.y+cell.h/2)*z);
+    });
+  }
+  vctx.restore();
+}
+
 /* ============================ status =========================== */
 function updateStatus(){
   const d=state.doc;
@@ -1500,7 +1704,7 @@ $('#btnGrid').addEventListener('click',()=>{
 });
 
 /* =========================== keyboard ========================== */
-const TOOL_KEYS={b:'pencil',e:'eraser',i:'eyedropper',c:'colorErase',f:'fill',l:'line',r:'rect',o:'ellipse',m:'select',v:'move',h:'pan'};
+const TOOL_KEYS={b:'pencil',e:'eraser',i:'eyedropper',c:'colorErase',f:'fill',l:'line',r:'rect',o:'ellipse',m:'select',v:'move',h:'pan',k:'slice'};
 document.addEventListener('keydown',e=>{
   const tag=e.target.tagName;
   if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA')return;
@@ -1519,8 +1723,8 @@ document.addEventListener('keydown',e=>{
     if(k==='n'&&e.altKey){e.preventDefault();openSizeDialog('new');return;}
     return;
   }
-  if(e.key==='Escape'){deselect();return;}
-  if(e.key==='Delete'||e.key==='Backspace'){deleteSelection();return;}
+  if(e.key==='Escape'){if(state.slice){cancelSlice();return;}deselect();return;}
+  if(e.key==='Delete'||e.key==='Backspace'){if(state.slice&&state.slice.active){sliceUndoEdge();return;}deleteSelection();return;}
   if(e.key==='Enter'){togglePlayback();return;}
   if(k===','||k==='.'){                       // step through frames
     commitFloat();
