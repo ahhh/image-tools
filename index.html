@@ -91,6 +91,16 @@ main{display:grid;grid-template-columns:auto minmax(0,1fr) 236px;min-height:0}
 .layer-row input{width:100%;font-size:12px;padding:1px 3px}
 .layer-row canvas{border:1px solid var(--border);background:#000;flex:none;image-rendering:pixelated}
 
+/* ---- token stamp ---- */
+.token-shapes{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:10px}
+.token-shape{padding:2px;display:grid;place-items:center;background:var(--deep);border:1px solid var(--border);cursor:pointer;min-width:0}
+.token-shape:hover{border-color:var(--border-hi)}
+.token-shape.current{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.token-shape canvas{display:block;pointer-events:none}
+#tokenPanel .token-actions{display:flex;gap:4px;margin-top:8px}
+#tokenPanel .token-actions button{flex:1}
+#btnTokenStamp{background:var(--accent);color:var(--ink);border-color:var(--accent)}
+
 /* ---- timeline ---- */
 #timeline{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--panel);border-top:1px solid var(--border)}
 .tl-group{display:flex;align-items:center;gap:4px}
@@ -177,6 +187,7 @@ dialog h3{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(-
     <button class="tool-btn" data-tool="move" title="Move selection (V)"><svg viewBox="0 0 16 16"><path d="M7 1h2v2h1v1h1v1h-1v1H9v1h4V6h1V5h1v1h1v1h1v2h-1v1h-1v1h-1v-1h-1v-1H9v4h1v1h1v1h-1v1H9v1H7v-1H6v-1H5v-1h1v-1h1V9H3v1H2v1H1v-1H0v-1H0V7h1V6h1V5h1v1h1v1h4V4H7V3H6V2h1z" transform="translate(0 -0.5)"/></svg></button>
     <button class="tool-btn" data-tool="pan" title="Pan (H) — drag to move the view · also Space+drag or middle-mouse"><svg viewBox="0 0 16 16"><path d="M6 5h1V2h1v3h1V3h1v2h1V4h1v2h1v5h-1v2h-1v1H6v-1H5v-1H4v-1H3v-1H2V9h1V8h2v1h1z"/></svg></button>
     <button class="tool-btn" data-tool="slice" title="Grid slicer (K) — carve the canvas into a grid and export each cell as its own image"><svg viewBox="0 0 16 16"><path d="M2 2h12v1H2z M2 13h12v1H2z M2 2v12h1V2z M13 2v12h1V2z M7 2v12h1V2z M2 7h12v1H2z"/></svg></button>
+    <button class="tool-btn" data-tool="token" title="Token stamp (T) — frame a character photo in a circle; click again to cut the token out and save the PNG"><svg viewBox="0 0 16 16"><path d="M6 2h4v1h2v1h1v2h1v4h-1v2h-1v1h-2v1H6v-1H4v-1H3v-2H2V6h1V4h1V3h2zm0 2H5v1H4v6h1v1h1v1h4v-1h1v-1h1V5h-1V4h-1V3H6zM7 5h2v2H7zM6 8h4v4H6z"/></svg></button>
   </nav>
 
   <div id="viewport"><canvas id="view"></canvas></div>
@@ -208,6 +219,30 @@ dialog h3{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(-
       </div>
       <div class="opt-row">
         <label><input id="fillShapes" type="checkbox"> Fill shapes</label>
+      </div>
+    </section>
+
+    <section class="panel" id="tokenPanel" hidden>
+      <h2>Token</h2>
+      <div id="tokenShapes" class="token-shapes" title="Frame style"></div>
+      <div class="opt-row">
+        <label for="tokenSize">Size</label>
+        <input id="tokenSize" type="range" min="10" max="140" step="1" value="90">
+        <output id="tokenSizeOut">90</output>
+      </div>
+      <div class="opt-row">
+        <label for="tokenThick">Border</label>
+        <input id="tokenThick" type="range" min="1" max="30" step="1" value="7">
+        <output id="tokenThickOut">7</output>
+      </div>
+      <div class="opt-row">
+        <label for="tokenColor">Color</label>
+        <input id="tokenColor" type="color" value="#f4f4f4" style="width:36px;height:24px;padding:0;border:1px solid var(--border);background:var(--deep)">
+        <span style="color:var(--dim);font-size:11px">plain frames only</span>
+      </div>
+      <div class="token-actions">
+        <button id="btnTokenStamp" title="Cut everything outside the frame and save the PNG">Stamp &amp; save</button>
+        <button id="btnTokenRemove" title="Delete the token frame layer (Esc)">Remove</button>
       </div>
     </section>
 
@@ -313,6 +348,27 @@ dialog h3{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(-
   </div>
 </dialog>
 
+<dialog id="tokenSaveDialog">
+  <h3>Save token</h3>
+  <p id="tokenSaveInfo" style="color:var(--dim);margin-bottom:12px;max-width:280px"></p>
+  <div class="dlg-row"><label for="tokenName">Name</label><input id="tokenName" type="text" spellcheck="false" value="token" style="width:120px"></div>
+  <div class="dlg-row">
+    <label for="tokenOut">Size</label>
+    <select id="tokenOut">
+      <option value="native">actual</option>
+      <option value="128">128 × 128</option>
+      <option value="256" selected>256 × 256</option>
+      <option value="512">512 × 512</option>
+      <option value="1024">1024 × 1024</option>
+    </select>
+  </div>
+  <div class="dlg-row"><label><input id="tokenSmooth" type="checkbox" checked> Smooth scaling (off for pixel art)</label></div>
+  <div class="dlg-actions">
+    <button id="tokenSaveCancel">Cancel</button>
+    <button id="tokenSaveOk" class="primary">Save PNG</button>
+  </div>
+</dialog>
+
 <input type="file" id="filePick" hidden>
 
 <script>
@@ -351,6 +407,7 @@ const state={
   hover:null,          // {x,y} doc pixel under cursor
   hoverFx:0, hoverFy:0,// last pointer position in fractional doc coords
   slice:null,          // grid-slicer session: {phase,needV,needH,vEdges,hEdges,active}
+  token:null,          // token-stamp session: {layerId,shapeId,cx,cy,r,thick,color}
 };
 
 /* ======================== document model ======================= */
@@ -363,7 +420,7 @@ function newDocument(w,h){
   layerIdCounter=0;
   state.doc={width:w,height:h,frames:[makeFrame(w,h)]};
   state.frame=0; state.layer=0;
-  state.selection=null; state.float=null; state.shapePreview=null;
+  state.selection=null; state.float=null; state.shapePreview=null; state.token=null;
   history.stack.length=0; history.index=-1;
   stopPlayback();
   zoomToFit();
@@ -395,6 +452,7 @@ function afterHistoryJump(){
   state.selection=null; state.float=null; state.shapePreview=null;
   state.frame=clamp(state.frame,0,state.doc.frames.length-1);
   state.layer=clamp(state.layer,0,activeFrame().layers.length-1);
+  tokenLayer();                 // drops the token session if its layer is gone
   refreshUI();
 }
 function updateUndoButtons(){
@@ -518,7 +576,7 @@ function render(){
     vctx.restore();
   }
   // hover pixel outline
-  if(state.hover&&!state.playing&&z>=3){
+  if(state.hover&&!state.playing&&z>=3&&state.tool!=='token'){
     const b=state.brushSize,o=Math.floor(b/2);
     vctx.strokeStyle='rgba(255,255,255,.5)';vctx.lineWidth=1;
     if(state.tool==='colorErase'){
@@ -532,6 +590,7 @@ function render(){
     }
   }
   if(state.slice)drawSliceOverlay(px,py,z);
+  if(state.tool==='token'&&tokenLayer())drawTokenOverlay(px,py,z);
   updateStatus();
 }
 function resizeView(){
@@ -839,6 +898,7 @@ const TOOLS={
   move:{},     // implemented with selection feature
   pan:{},      // panning is handled directly in the pointer handlers
   slice:{},    // implemented with the grid-slicer feature
+  token:{},    // implemented with the token-stamp feature
 };
 const TOOL_HINTS={
   pencil:'Pencil — left: primary, right: secondary, Alt: pick color',
@@ -853,9 +913,12 @@ const TOOL_HINTS={
   move:'Move — drag selection or whole layer',
   pan:'Pan — drag to move the view (also Space+drag or middle-mouse from any tool)',
   slice:'Grid slicer — click to place grid edges, then export each cell as its own image',
+  token:'Token — drag the frame to position it, drag its edge to resize · click the tool again to stamp & save the PNG',
 };
 function setTool(name){
   if(!(name in TOOLS))return;
+  // second click on the token tool cuts the token out and offers the PNG
+  if(name==='token'&&state.tool==='token'&&tokenLayer()){stampToken();return;}
   const wasSel=state.tool==='select'||state.tool==='move';
   const isSel=name==='select'||name==='move';
   if(state.tool!==name&&wasSel&&!isSel)commitFloat();
@@ -863,7 +926,9 @@ function setTool(name){
   $$('.tool-btn').forEach(b=>b.classList.toggle('active',b.dataset.tool===name));
   viewCanvas.classList.toggle('hand',name==='pan');
   $('#statusHint').textContent=TOOL_HINTS[name]||'';
+  $('#tokenPanel').hidden=name!=='token';
   if(name==='slice'&&!state.slice)openSliceDialog();
+  if(name==='token'&&!tokenLayer())createToken();
   requestRender();
 }
 $$('.tool-btn').forEach(b=>b.addEventListener('click',()=>setTool(b.dataset.tool)));
@@ -1321,7 +1386,7 @@ async function openProject(text){
   if(!frames.length)throw new Error('project has no frames');
   state.doc={width:data.width,height:data.height,frames};
   state.frame=0;state.layer=0;
-  state.selection=null;state.float=null;state.shapePreview=null;
+  state.selection=null;state.float=null;state.shapePreview=null;state.token=null;
   if(Array.isArray(data.palette)&&data.palette.length)state.palette=data.palette;
   if(data.fps){state.fps=clamp(data.fps,1,60);$('#fpsInput').value=state.fps;}
   history.stack.length=0;history.index=-1;
@@ -1340,7 +1405,7 @@ function openImageAsDocument(im){
   frame.layers[0].canvas.getContext('2d').drawImage(im,0,0);
   state.doc={width:im.width,height:im.height,frames:[frame]};
   state.frame=0;state.layer=0;
-  state.selection=null;state.float=null;state.shapePreview=null;
+  state.selection=null;state.float=null;state.shapePreview=null;state.token=null;
   history.stack.length=0;history.index=-1;
   stopPlayback();
   zoomToFit();
@@ -1712,6 +1777,358 @@ function drawSliceOverlay(px,py,z){
   vctx.restore();
 }
 
+/* =========================== token stamp ====================== */
+/* Frame a character photo inside a token border on its own top layer, drag it
+   into place, then cut everything outside the frame away and save the PNG. */
+const TOKEN_SHAPES=[
+  {id:'circle',label:'Circle',        kind:'circle'},
+  {id:'double',label:'Double ring',   kind:'circle',double:true,thick:1.6},
+  {id:'thin',  label:'Thin ring',     kind:'circle',thick:0.45},
+  {id:'gold',  label:'Gold',          kind:'circle',paint:'gold',  thick:1.7},
+  {id:'silver',label:'Silver',        kind:'circle',paint:'silver',thick:1.7},
+  {id:'bronze',label:'Bronze',        kind:'circle',paint:'bronze',thick:1.7},
+  {id:'steel', label:'Steel',         kind:'circle',paint:'steel', thick:1.1},
+  {id:'gear',  label:'Gear',          kind:'tooth',teeth:60,depth:.05},
+  {id:'spiked',label:'Spiked',        kind:'tooth',teeth:32,depth:.13},
+  {id:'square',label:'Square',        kind:'poly',n:4, rot:Math.PI/4},
+  {id:'hex',   label:'Hexagon',       kind:'poly',n:6, rot:0},
+  {id:'oct',   label:'Octagon',       kind:'poly',n:8, rot:Math.PI/8},
+  {id:'nona',  label:'Nonagon',       kind:'poly',n:9, rot:-Math.PI/2},
+  {id:'deca',  label:'Decagon',       kind:'poly',n:10,rot:-Math.PI/2},
+  {id:'dodeca',label:'Dodecagon',     kind:'poly',n:12,rot:-Math.PI/2},
+];
+/* metallic frames are painted with a diagonal gradient; the rest use tokenPrefs.color */
+const TOKEN_METALS={
+  gold:  [[0,'#fff3c8'],[.18,'#f6c545'],[.42,'#a35b16'],[.62,'#5e1f0d'],[.82,'#c8721f'],[1,'#f7d071']],
+  silver:[[0,'#ffffff'],[.20,'#d3d7de'],[.45,'#767b87'],[.66,'#2f323a'],[.86,'#9aa0ac'],[1,'#e6e9ee']],
+  bronze:[[0,'#ffe0b8'],[.22,'#d59356'],[.50,'#8a4a1e'],[.74,'#4a2410'],[1,'#c98341']],
+  steel: [[0,'#e9ecf2'],[.30,'#9aa0ac'],[.55,'#5a5f6b'],[.78,'#8d93a0'],[1,'#cfd4dc']],
+};
+const tokenPrefs={shapeId:'circle',size:90,thick:7,color:'#f4f4f4'};
+let tokenExport=null;   // {x,y,size} in doc px — bounds of the last stamped token
+
+function shapeOf(tk){return TOKEN_SHAPES.find(s=>s.id===tk.shapeId)||TOKEN_SHAPES[0];}
+/* the token lives on one layer of the current frame; if that layer is gone
+   (undo, layer delete, frame switch) the session goes with it */
+function tokenLayer(){
+  const tk=state.token;
+  if(!tk)return null;
+  const layers=activeFrame().layers;
+  const i=layers.findIndex(l=>l.id===tk.layerId);
+  if(i<0){state.token=null;return null;}
+  tk.layerIndex=i;
+  return layers[i];
+}
+
+/* ---------- frame geometry: an outer path minus an inner one ---------- */
+function polyPath(ctx,cx,cy,r,n,rot){
+  ctx.moveTo(cx+Math.cos(rot)*r,cy+Math.sin(rot)*r);
+  for(let i=1;i<n;i++){const a=rot+i*2*Math.PI/n;ctx.lineTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r);}
+  ctx.closePath();
+}
+function circleSub(ctx,cx,cy,r){ctx.moveTo(cx+r,cy);ctx.arc(cx,cy,r,0,Math.PI*2);ctx.closePath();}
+function toothPath(ctx,cx,cy,r,teeth,depth){
+  const ri=r*(1-depth);
+  for(let i=0;i<teeth*2;i++){
+    const a=-Math.PI/2+i*Math.PI/teeth,rr=(i%2)?ri:r;
+    const x=cx+Math.cos(a)*rr,y=cy+Math.sin(a)*rr;
+    i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+  }
+  ctx.closePath();
+}
+function shapeOuter(ctx,sh,cx,cy,r){          // caller owns beginPath()
+  if(sh.kind==='poly')polyPath(ctx,cx,cy,r,sh.n,sh.rot);
+  else if(sh.kind==='tooth')toothPath(ctx,cx,cy,r,sh.teeth,sh.depth);
+  else circleSub(ctx,cx,cy,r);
+}
+function shapeInner(ctx,sh,cx,cy,r,w){
+  if(sh.kind==='poly'){                        // uniform band ⇒ shrink the apothem by w
+    const ri=r-w/Math.cos(Math.PI/sh.n);
+    if(ri>0)polyPath(ctx,cx,cy,ri,sh.n,sh.rot);
+  }else if(sh.kind==='tooth'){                 // teeth outside, smooth ring inside
+    const ri=r*(1-sh.depth)-w;
+    if(ri>0)circleSub(ctx,cx,cy,ri);
+  }else{
+    const ri=r-w;
+    if(ri>0)circleSub(ctx,cx,cy,ri);
+  }
+}
+function tokenPaint(ctx,sh,cx,cy,r,color){
+  const stops=TOKEN_METALS[sh.paint];
+  if(!stops)return color||'#f4f4f4';
+  const g=ctx.createLinearGradient(cx-r,cy-r,cx+r*.6,cy+r);
+  stops.forEach(([o,c])=>g.addColorStop(o,c));
+  return g;
+}
+function drawBand(ctx,sh,cx,cy,r,w){
+  ctx.beginPath();
+  shapeOuter(ctx,sh,cx,cy,r);
+  shapeInner(ctx,sh,cx,cy,r,w);
+  ctx.fill('evenodd');
+}
+function drawTokenFrame(ctx,sh,cx,cy,r,w,color){
+  if(r<=.5||w<=0)return;
+  ctx.save();
+  ctx.fillStyle=tokenPaint(ctx,sh,cx,cy,r,color);
+  if(sh.double){
+    const t=Math.max(.6,w*.32),gap=w*.66;
+    drawBand(ctx,sh,cx,cy,r,t);
+    if(r-gap-t>0)drawBand(ctx,sh,cx,cy,r-gap,t);
+  }else{
+    drawBand(ctx,sh,cx,cy,r,w);
+  }
+  ctx.restore();
+}
+function tokenBorderWidth(tk){
+  const sh=shapeOf(tk);
+  return Math.max(.75,tk.r*tk.thick*(sh.thick||1));
+}
+function drawTokenIntoLayer(){
+  const l=tokenLayer();
+  if(!l)return;
+  const tk=state.token,ctx=l.canvas.getContext('2d');
+  ctx.clearRect(0,0,l.canvas.width,l.canvas.height);
+  drawTokenFrame(ctx,shapeOf(tk),tk.cx,tk.cy,tk.r,tokenBorderWidth(tk),tk.color);
+}
+
+/* ---------- session lifecycle ---------- */
+function createToken(){
+  stopPlayback();
+  commitFloat();
+  const d=state.doc;
+  structuralOp(()=>{
+    const layers=activeFrame().layers;
+    const l=makeLayer(d.width,d.height,'Token frame');
+    layers.push(l);
+    state.layer=layers.length-1;
+    state.token={layerId:l.id,layerIndex:state.layer,shapeId:tokenPrefs.shapeId,
+      cx:d.width/2,cy:d.height/2,
+      r:Math.min(d.width,d.height)/2*(tokenPrefs.size/100),
+      thick:tokenPrefs.thick/100,color:tokenPrefs.color};
+    drawTokenIntoLayer();          // inside the op so redo restores the drawn frame
+  });
+  renderTokenShapes();
+  $('#statusHint').textContent='Token — drag to position, drag the edge to resize · click the tool again to stamp & save';
+}
+function removeToken(){
+  if(!tokenLayer())return;
+  const idx=state.token.layerIndex;
+  structuralOp(()=>{
+    const layers=activeFrame().layers;
+    if(layers.length>1)layers.splice(idx,1);
+    else layers[0]=makeLayer(state.doc.width,state.doc.height,layers[0].name);
+    state.layer=clamp(state.layer,0,activeFrame().layers.length-1);
+    state.token=null;
+  });
+  $('#statusHint').textContent='Token frame removed';
+}
+/* history entry that carries both the frame pixels and the token parameters */
+function pushTokenHistory(before,tokenBefore){
+  const l=tokenLayer();
+  if(!l)return;
+  const f=state.frame,i=state.token.layerIndex;
+  const after=cloneCanvas(l.canvas),tokenAfter={...state.token};
+  pushHistory({
+    undo(){blitLayer(f,i,before);state.token=tokenBefore?{...tokenBefore}:null;requestRender();refreshThumbs();},
+    redo(){blitLayer(f,i,after);state.token={...tokenAfter};requestRender();refreshThumbs();},
+  });
+  refreshThumbs();
+}
+/* edit the live token, recording one undo step for the whole change */
+function editToken(fn){
+  const l=tokenLayer();
+  if(!l)return;
+  const before=cloneCanvas(l.canvas),tokenBefore={...state.token};
+  fn(state.token);
+  drawTokenIntoLayer();
+  pushTokenHistory(before,tokenBefore);
+  requestRender();
+}
+
+/* drag inside the frame to move it, drag its edge to resize, click outside to recentre */
+TOOLS.token={
+  onDown(p,e){
+    if(!tokenLayer()){createToken();return;}
+    if(e.button!==0)return;
+    const tk=state.token;
+    const dx=p.fx-tk.cx,dy=p.fy-tk.cy,dist=Math.hypot(dx,dy);
+    const band=Math.max(tk.r*.12,8/state.zoom);
+    this.before=cloneCanvas(tokenLayer().canvas);
+    this.tokenBefore={...tk};
+    if(Math.abs(dist-tk.r)<=band){this.mode='resize';}
+    else{this.mode='move';this.grab=dist<tk.r?{dx,dy}:{dx:0,dy:0};}
+    if(this.mode==='move'){tk.cx=p.fx-this.grab.dx;tk.cy=p.fy-this.grab.dy;drawTokenIntoLayer();}
+    requestRender();
+  },
+  onMove(p){
+    const tk=state.token;
+    if(!tk||!this.mode)return;
+    if(this.mode==='resize'){
+      const maxR=Math.max(state.doc.width,state.doc.height)*1.5;
+      tk.r=clamp(Math.hypot(p.fx-tk.cx,p.fy-tk.cy),2,maxR);
+      tokenPrefs.size=Math.round(tk.r*200/Math.min(state.doc.width,state.doc.height));
+      syncTokenPanel();
+    }else{
+      tk.cx=p.fx-this.grab.dx;tk.cy=p.fy-this.grab.dy;
+    }
+    drawTokenIntoLayer();
+    requestRender();
+  },
+  onUp(){
+    if(!this.mode)return;
+    this.mode=null;
+    if(this.before)pushTokenHistory(this.before,this.tokenBefore);
+    this.before=null;
+  },
+};
+/* dashed guide so the frame's cut line and resize band stay visible */
+function drawTokenOverlay(px,py,z){
+  const tk=state.token;
+  vctx.save();
+  vctx.lineWidth=1;
+  vctx.setLineDash([5,4]);
+  vctx.strokeStyle='rgba(0,0,0,.6)';
+  vctx.beginPath();shapeOuter(vctx,shapeOf(tk),px+tk.cx*z,py+tk.cy*z,tk.r*z);vctx.stroke();
+  vctx.lineDashOffset=5;
+  vctx.strokeStyle='#59d9e8';
+  vctx.beginPath();shapeOuter(vctx,shapeOf(tk),px+tk.cx*z,py+tk.cy*z,tk.r*z);vctx.stroke();
+  vctx.setLineDash([]);
+  const cx=px+tk.cx*z,cy=py+tk.cy*z;
+  vctx.beginPath();
+  vctx.moveTo(cx-5,cy);vctx.lineTo(cx+5,cy);
+  vctx.moveTo(cx,cy-5);vctx.lineTo(cx,cy+5);
+  vctx.stroke();
+  vctx.restore();
+}
+
+/* ---------- stamp: cut every layer down to the frame, then offer the PNG ---------- */
+function stampToken(){
+  const l=tokenLayer();
+  if(!l)return;
+  const tk=state.token,d=state.doc;
+  const mask=makeCanvas(d.width,d.height),mctx=mask.getContext('2d');
+  mctx.fillStyle='#fff';
+  mctx.beginPath();
+  shapeOuter(mctx,shapeOf(tk),tk.cx,tk.cy,tk.r);
+  mctx.fill();
+  tokenExport={x:Math.round(tk.cx-tk.r),y:Math.round(tk.cy-tk.r),size:Math.max(1,Math.round(tk.r*2))};
+  const tokenBefore={...tk};
+  structuralOp(()=>{
+    activeFrame().layers.forEach(layer=>{
+      const c=layer.canvas.getContext('2d');
+      c.globalCompositeOperation='destination-in';
+      c.drawImage(mask,0,0);
+      c.globalCompositeOperation='source-over';
+    });
+    state.token=null;
+  });
+  const entry=history.stack[history.index];   // undoing the cut brings the session back
+  if(entry){
+    const undoDoc=entry.undo;
+    entry.undo=()=>{undoDoc();state.token={...tokenBefore};};
+  }
+  $('#statusHint').textContent='Token stamped — everything outside the frame is transparent';
+  openTokenSave();
+}
+function openTokenSave(){
+  if(!tokenExport)return;
+  $('#tokenSaveInfo').textContent=
+    `The token is ${tokenExport.size} × ${tokenExport.size} px on the canvas. It saves as a square PNG with a transparent surround.`;
+  $('#tokenSaveDialog').showModal();
+}
+function exportToken(name){
+  const box=tokenExport;
+  if(!box)return;
+  const sel=$('#tokenOut').value;
+  const size=sel==='native'?box.size:(+sel||box.size);
+  const smooth=$('#tokenSmooth').checked;
+  const crop=makeCanvas(box.size,box.size),cctx=crop.getContext('2d');
+  cctx.imageSmoothingEnabled=false;
+  cctx.drawImage(renderComposite(state.frame),-box.x,-box.y);
+  const out=makeCanvas(size,size),octx=out.getContext('2d');
+  octx.imageSmoothingEnabled=smooth;
+  octx.imageSmoothingQuality='high';
+  octx.drawImage(crop,0,0,size,size);
+  download(`${name}.png`,out.toDataURL('image/png'));
+  $('#statusHint').textContent=`Token saved as ${name}.png (${size} × ${size})`;
+}
+$('#tokenSaveDialog').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();$('#tokenSaveOk').click();}
+});
+$('#tokenSaveCancel').addEventListener('click',()=>$('#tokenSaveDialog').close());
+$('#tokenSaveOk').addEventListener('click',()=>{
+  const name=$('#tokenName').value.trim()||'token';
+  $('#tokenSaveDialog').close();
+  exportToken(name);
+});
+
+/* ---------- token panel ---------- */
+function renderTokenShapes(){
+  const wrap=$('#tokenShapes');
+  wrap.innerHTML='';
+  const dpr=window.devicePixelRatio||1,S=44;
+  TOKEN_SHAPES.forEach(sh=>{
+    const b=document.createElement('button');
+    b.className='token-shape'+(sh.id===tokenPrefs.shapeId?' current':'');
+    b.title=sh.label;
+    const c=makeCanvas(Math.round(S*dpr),Math.round(S*dpr));
+    c.style.width=c.style.height=S+'px';
+    const ctx=c.getContext('2d');
+    ctx.scale(dpr,dpr);
+    drawTokenFrame(ctx,sh,S/2,S/2,S/2-2.5,Math.max(1.2,2.6*(sh.thick||1)),tokenPrefs.color);
+    b.appendChild(c);
+    b.addEventListener('click',()=>{
+      tokenPrefs.shapeId=sh.id;
+      renderTokenShapes();
+      if(tokenLayer())editToken(tk=>{tk.shapeId=sh.id;});
+    });
+    wrap.appendChild(b);
+  });
+}
+function syncTokenPanel(){
+  $('#tokenSize').value=tokenPrefs.size;
+  $('#tokenSizeOut').textContent=tokenPrefs.size;
+  $('#tokenThick').value=tokenPrefs.thick;
+  $('#tokenThickOut').textContent=tokenPrefs.thick;
+  $('#tokenColor').value=tokenPrefs.color;
+}
+/* slider drags stay live but record a single undo step on release */
+let tokenLiveBefore=null;
+function tokenLiveEdit(fn){
+  const l=tokenLayer();
+  if(!l)return;
+  if(!tokenLiveBefore)tokenLiveBefore={canvas:cloneCanvas(l.canvas),token:{...state.token}};
+  fn(state.token);
+  drawTokenIntoLayer();
+  requestRender();
+}
+function tokenLiveCommit(){
+  if(!tokenLiveBefore)return;
+  const b=tokenLiveBefore;
+  tokenLiveBefore=null;
+  pushTokenHistory(b.canvas,b.token);
+}
+$('#tokenSize').addEventListener('input',e=>{
+  tokenPrefs.size=+e.target.value;
+  $('#tokenSizeOut').textContent=e.target.value;
+  tokenLiveEdit(tk=>{tk.r=Math.min(state.doc.width,state.doc.height)/2*(tokenPrefs.size/100);});
+});
+$('#tokenThick').addEventListener('input',e=>{
+  tokenPrefs.thick=+e.target.value;
+  $('#tokenThickOut').textContent=e.target.value;
+  tokenLiveEdit(tk=>{tk.thick=tokenPrefs.thick/100;});
+});
+$('#tokenSize').addEventListener('change',tokenLiveCommit);
+$('#tokenThick').addEventListener('change',tokenLiveCommit);
+$('#tokenColor').addEventListener('input',e=>{
+  tokenPrefs.color=e.target.value;
+  renderTokenShapes();
+  tokenLiveEdit(tk=>{tk.color=tokenPrefs.color;});
+});
+$('#tokenColor').addEventListener('change',tokenLiveCommit);
+$('#btnTokenStamp').addEventListener('click',()=>{if(tokenLayer())stampToken();});
+$('#btnTokenRemove').addEventListener('click',removeToken);
+
 /* ============================ status =========================== */
 function updateStatus(){
   const d=state.doc;
@@ -1734,7 +2151,7 @@ $('#btnGrid').addEventListener('click',()=>{
 });
 
 /* =========================== keyboard ========================== */
-const TOOL_KEYS={b:'pencil',e:'eraser',i:'eyedropper',c:'colorErase',f:'fill',l:'line',r:'rect',o:'ellipse',m:'select',v:'move',h:'pan',k:'slice'};
+const TOOL_KEYS={b:'pencil',e:'eraser',i:'eyedropper',c:'colorErase',f:'fill',l:'line',r:'rect',o:'ellipse',m:'select',v:'move',h:'pan',k:'slice',t:'token'};
 document.addEventListener('keydown',e=>{
   const tag=e.target.tagName;
   if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA')return;
@@ -1753,7 +2170,11 @@ document.addEventListener('keydown',e=>{
     if(k==='n'&&e.altKey){e.preventDefault();openSizeDialog('new');return;}
     return;
   }
-  if(e.key==='Escape'){if(state.slice){cancelSlice();return;}deselect();return;}
+  if(e.key==='Escape'){
+    if(state.slice){cancelSlice();return;}
+    if(state.tool==='token'&&tokenLayer()){removeToken();return;}
+    deselect();return;
+  }
   if(e.key==='Delete'||e.key==='Backspace'){if(state.slice&&state.slice.active){sliceUndoEdge();return;}deleteSelection();return;}
   if(e.key==='Enter'){togglePlayback();return;}
   if(k===','||k==='.'){                       // step through frames
@@ -1786,6 +2207,8 @@ function refreshUI(){
   requestRender();
 }
 resizeView();
+renderTokenShapes();
+syncTokenPanel();
 newDocument(32,32);
 setTool('pencil');
 </script>

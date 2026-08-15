@@ -20,6 +20,7 @@ Derived from `Browser_Sprite_Editor_Plan.md` (single-file browser sprite/image e
 - [x] **8. Import / export** — export PNG at 1–16× scale, export horizontal spritesheet strip; **Open** loads a project (.json) or an image as a new document; **Import** places an image onto the selected layer as a floating selection (drag to position, other layers untouched)
 - [x] **9. Canvas operations** — new document dialog with presets, resize canvas, flip horizontal/vertical, rotate 90°
 - [x] **10. Shortcuts & polish** — full keyboard map (tool keys, `X` swap, `[` `]` brush size, `Delete`), status bar (cursor position, document size, zoom), tooltips
+- [x] **11. Token stamp** — turn a character photo into a round PNG token: picking the tool drops a frame on a new top layer (15 styles — plain/double/thin rings, gold/silver/bronze/steel metals, gear, spiked, and 4–12-sided polygons), drag to position and drag its edge to resize, then click the tool again to cut everything outside the frame away and save a square PNG with a transparent surround
 
 All ten features are implemented and verified end-to-end in headless Chromium (30/30 checks: draw/undo/fill/shapes, layer merge, selection move, copy/paste, frame playback, flip/rotate/resize, export, project round-trip).
 
@@ -27,7 +28,8 @@ All ten features are implemented and verified end-to-end in headless Chromium (3
 
 | Action | Input |
 | --- | --- |
-| Tools | `B` pencil · `E` eraser · `I` eyedropper · `F` fill · `L` line · `R` rect · `O` ellipse · `M` select · `V` move |
+| Tools | `B` pencil · `E` eraser · `I` eyedropper · `F` fill · `L` line · `R` rect · `O` ellipse · `M` select · `V` move · `T` token |
+| Token | `T` (or the circle button) places the frame · drag to move, drag the edge to resize · `T` again stamps & saves the PNG · `Esc` removes the frame |
 | Draw | left = primary, right = secondary, `Alt`+click = pick color, `Shift` = constrain shape |
 | Brush size | `[` / `]` or the Tool panel slider |
 | Colors | `X` swap, click a chip to open the picker, right-click a swatch to remove it |
